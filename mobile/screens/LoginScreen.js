@@ -25,6 +25,7 @@ export default function LoginScreen({ navigation }) {
       setChallengeId(result.challengeId);
       setStep('otp');
     } catch (err) {
+      console.error('FS_EVENT: login_failed', { email, reason: err.message });
       setError(err.message);
     } finally {
       setLoading(false);
@@ -38,6 +39,8 @@ export default function LoginScreen({ navigation }) {
       const result = await api.verifyLoginOtp({ challengeId, otp });
       await AsyncStorage.setItem('token', result.token);
       await AsyncStorage.setItem('accountId', String(result.accountId));
+      await AsyncStorage.setItem('user_prefs', JSON.stringify({ theme: 'light', notifications: true }));
+      console.log('FS_EVENT: login_success', { accountId: result.accountId, timestamp: Date.now() });
       navigation.reset({ index: 0, routes: [{ name: 'Dashboard' }] });
     } catch (err) {
       setError(err.message);
@@ -64,7 +67,7 @@ export default function LoginScreen({ navigation }) {
             <>
               <Field label="Email" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
               <Field label="Password" secureTextEntry value={password} onChangeText={setPassword} />
-              <Button title="Continue" onPress={submitPassword} loading={loading} />
+              <Button title="Continue" onPress={submitPassword} loading={loading} disabled={!email || !password} />
             </>
           )}
 

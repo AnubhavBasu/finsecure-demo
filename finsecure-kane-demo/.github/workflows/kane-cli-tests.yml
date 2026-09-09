@@ -1,0 +1,113 @@
+# .github/workflows/kane-cli-tests.yml
+# Kane-CLI browser tests for FinSecure banking app
+name: Kane-CLI Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  kane-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpassword
+          MYSQL_DATABASE: finsecure_demo
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Install Kane CLI
+        run: npm install -g @testmuai/kane-cli
+
+      - name: Setup database
+        run: mysql -h 127.0.0.1 -u root -prootpassword finsecure_demo < backend/schema.sql
+
+      # NOTE: DB_HOST/DB_USER/DB_PASSWORD/DB_NAME below are assumed to match
+      # backend/.env.example — this has not been pulled and verified yet.
+      # Confirm the actual variable names in backend/db.js and
+      # backend/.env.example before relying on this job; fix if they differ.
+      - name: Install and start backend
+        working-directory: backend
+        env:
+          DB_HOST: 127.0.0.1
+          DB_USER: root
+          DB_PASSWORD: rootpassword
+          DB_NAME: finsecure_demo
+          PORT: 4000
+        run: |
+          npm install
+          npm run seed
+          npm run dev &
+          sleep 5
+          curl -f http://localhost:4000/api/health
+
+      - name: Install and start web app
+        working-directory: web
+        run: |
+          npm install
+          npm run dev &
+          sleep 5
+          curl -f http://localhost:5173 || true
+
+      - name: Run Kane-CLI login test
+        env:
+          LT_USERNAME: ${{ secrets.LT_USERNAME }}
+          LT_ACCESS_KEY: ${{ secrets.LT_ACCESS_KEY }}
+        run: |
+          kane-cli run \
+            "go to http://localhost:5173/login, \
+             fill the email field with 'demo@finsecure.com', \
+             fill the password field with 'Passw0rd!', \
+             click the Continue button, \
+             fill the one-time passcode field with '123456', \
+             click the Verify button, \
+             assert URL contains /dashboard" \
+            --url http://localhost:5173 \
+            --headless \
+            --agent \
+            --timeout 120 \
+            --username "$LT_USERNAME" \
+            --access-key "$LT_ACCESS_KEY"
+
+      - name: Run Kane-CLI testmd login flow
+        env:
+          LT_USERNAME: ${{ secrets.LT_USERNAME }}
+          LT_ACCESS_KEY: ${{ secrets.LT_ACCESS_KEY }}
+        run: |
+          kane-cli testmd run kane-cli-tests/tests/login_flow_test.md \
+            --agent \
+            --headless \
+            --timeout 180 \
+            --username "$LT_USERNAME" \
+            --access-key "$LT_ACCESS_KEY"
+
+      - name: Upload evidence artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kane-cli-evidence
+          path: |
+            ~/.testmuai/kaneai/sessions/
+            .testmuai/evidence/
+          retention-days: 14

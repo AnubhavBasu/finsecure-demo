@@ -8,15 +8,17 @@ const VARIANTS = {
   ghostLight: { bg: 'transparent', text: colors.white, border: 'rgba(255,255,255,0.35)' },
 };
 
-export default function Button({ title, onPress, variant = 'primary', loading = false, style }) {
+export default function Button({ title, onPress, variant = 'primary', loading = false, disabled = false, style }) {
   const v = VARIANTS[variant] || VARIANTS.primary;
+  const isDisabled = loading || disabled;
   return (
     <Pressable
       onPress={onPress}
-      disabled={loading}
+      disabled={isDisabled}
+      accessibilityState={{ disabled: isDisabled }}
       style={({ pressed }) => [
         styles.base,
-        { backgroundColor: v.bg, borderColor: v.border, opacity: pressed ? 0.85 : 1 },
+        { backgroundColor: v.bg, borderColor: v.border, opacity: isDisabled && !loading ? 0.5 : pressed ? 0.85 : 1 },
         style,
       ]}
     >

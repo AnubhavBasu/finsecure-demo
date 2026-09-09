@@ -22,6 +22,7 @@ export default function TransferScreen({ navigation }) {
     setError(null);
     setMessage(null);
     setLoading(true);
+    console.log('FS_EVENT: transfer_initiated', { toPayee, amount: Number(amount) });
     try {
       const accountId = await AsyncStorage.getItem('accountId');
       const result = await api.transfer({ accountId, toPayee, amount: Number(amount) });
@@ -29,9 +30,11 @@ export default function TransferScreen({ navigation }) {
         setChallengeId(result.challengeId);
         setMessage(result.message);
       } else {
+        console.log('FS_EVENT: transfer_completed', { toPayee: result.toPayee, amount: result.amount });
         setMessage(`Transfer of $${result.amount} to ${result.toPayee} completed.`);
       }
     } catch (err) {
+      console.error('FS_EVENT: transfer_failed', { toPayee, amount, reason: err.message });
       setError(err.message);
     } finally {
       setLoading(false);
@@ -43,6 +46,7 @@ export default function TransferScreen({ navigation }) {
     setLoading(true);
     try {
       const result = await api.verifyTransferOtp({ challengeId, otp });
+      console.log('FS_EVENT: transfer_completed', { toPayee: result.toPayee, amount: result.amount });
       setMessage(`Transfer of $${result.amount} to ${result.toPayee} completed.`);
       setChallengeId(null);
     } catch (err) {
@@ -64,7 +68,7 @@ export default function TransferScreen({ navigation }) {
               <>
                 <Field label="Pay to (email)" autoCapitalize="none" value={toPayee} onChangeText={setToPayee} />
                 <Field label="Amount ($)" keyboardType="numeric" value={amount} onChangeText={setAmount} />
-                <Button title="Send" onPress={submitTransfer} loading={loading} />
+                <Button title="Send" onPress={submitTransfer} loading={loading} disabled={!toPayee || !amount || Number(amount) <= 0} />
               </>
             )}
             {challengeId && (
