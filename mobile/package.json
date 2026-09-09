@@ -1,0 +1,27 @@
+{
+  "name": "finsecure-demo-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios"
+  },
+  "dependencies": {
+    "@expo-google-fonts/ibm-plex-mono": "^0.4.0",
+    "@expo-google-fonts/ibm-plex-sans": "^0.3.0",
+    "@expo-google-fonts/source-serif-4": "^0.4.0",
+    "@react-native-async-storage/async-storage": "^2.1.0",
+    "@react-navigation/native": "^7.0.0",
+    "@react-navigation/native-stack": "^7.0.0",
+    "expo": "~57.0.0",
+    "expo-font": "*",
+    "expo-splash-screen": "*",
+    "expo-status-bar": "~2.2.0",
+    "react": "19.2.0",
+    "react-native": "0.86.1",
+    "react-native-safe-area-context": "^5.1.0",
+    "react-native-screens": "^4.4.0"
+  }
+}
