@@ -3,6 +3,7 @@ const BASE_URL = 'http://localhost:4000/api';
 async function request(path, options = {}) {
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include', // send/receive the session_id cookie across the 5173 → 4000 origin boundary
     ...options,
   });
   const data = await res.json().catch(() => ({}));

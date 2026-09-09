@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import PublicHeader from '../components/PublicHeader.jsx';
 import PublicFooter from '../components/PublicFooter.jsx';
@@ -11,7 +11,7 @@ export default function SignUp() {
   });
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
-
+  useEffect(() => { document.title = 'Sign Up — FinSecure'; }, []);
   const update = (field) => (e) => setForm({ ...form, [field]: e.target.value });
 
   const submit = async (e) => {

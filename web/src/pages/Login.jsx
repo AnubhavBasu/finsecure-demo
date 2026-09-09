@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import PublicHeader from '../components/PublicHeader.jsx';
 import PublicFooter from '../components/PublicFooter.jsx';
@@ -12,7 +12,7 @@ export default function Login() {
   const [otp, setOtp] = useState('');
   const [challengeId, setChallengeId] = useState(null);
   const [error, setError] = useState(null);
-
+  useEffect(() => { document.title = 'Login — FinSecure'; }, []);
   const submitPassword = async (e) => {
     e.preventDefault();
     setError(null);
@@ -21,6 +21,7 @@ export default function Login() {
       setChallengeId(result.challengeId);
       setStep('otp');
     } catch (err) {
+      console.error('FS_EVENT: login_failed', { email, reason: err.message });
       setError(err.message);
     }
   };
@@ -32,6 +33,8 @@ export default function Login() {
       const result = await api.verifyLoginOtp({ challengeId, otp });
       localStorage.setItem('token', result.token);
       localStorage.setItem('accountId', result.accountId);
+      localStorage.setItem('user_prefs', JSON.stringify({ theme: 'light', notifications: true }));
+      console.log('FS_EVENT: login_success', { accountId: result.accountId, timestamp: Date.now() });
       navigate('/dashboard');
     } catch (err) {
       setError(err.message);
@@ -72,7 +75,13 @@ export default function Login() {
                 <label>Password</label>
                 <input required type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
               </div>
-              <button type="submit" className="btn btn-primary btn-block">Continue</button>
+                          <button
+              type="submit"
+              className="btn btn-primary btn-block"
+              disabled={!email || !password}
+              aria-label="Continue to OTP verification">
+              Continue
+            </button>
             </form>
           )}
           {step === 'otp' && (

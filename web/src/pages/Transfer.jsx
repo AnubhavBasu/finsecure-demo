@@ -15,15 +15,18 @@ export default function Transfer() {
     e.preventDefault();
     setError(null);
     setMessage(null);
+    console.log('FS_EVENT: transfer_initiated', { toPayee, amount: Number(amount) });
     try {
       const result = await api.transfer({ accountId, toPayee, amount: Number(amount) });
       if (result.requiresOtp) {
         setChallengeId(result.challengeId);
         setMessage(result.message);
       } else {
+        console.log('FS_EVENT: transfer_completed', { toPayee: result.toPayee, amount: result.amount });
         setMessage(`Transfer of $${result.amount} to ${result.toPayee} completed.`);
       }
     } catch (err) {
+      console.error('FS_EVENT: transfer_failed', { toPayee, amount, reason: err.message });
       setError(err.message);
     }
   };
@@ -66,7 +69,13 @@ export default function Transfer() {
               <label>One-time passcode</label>
               <input required value={otp} onChange={(e) => setOtp(e.target.value)} />
             </div>
-            <button type="submit" className="btn btn-primary btn-block">Confirm transfer</button>
+                        <button
+              type="submit"
+              className="btn btn-primary btn-block"
+              disabled={!toPayee || !amount || Number(amount) <= 0}
+              aria-label="Submit fund transfer">
+              Send
+            </button>
           </form>
         )}
         {message && <div className="message message-success" style={{ marginTop: 16 }}>{message}</div>}

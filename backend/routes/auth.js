@@ -127,6 +127,13 @@ router.post('/verify-otp', (req, res) => {
   // Demo-only "session": a token that just encodes the account id.
   // Not a real auth token — do not reuse this pattern outside a demo.
   const token = `demo-token-${result.payload.accountId}`;
+  // After generating the JWT token in the verify-otp handler, add:
+  res.cookie('session_id', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'Strict',
+    maxAge: 30 * 60 * 1000 // 30 minutes
+  });
   return res.json({ token, accountId: result.payload.accountId });
 });
 
