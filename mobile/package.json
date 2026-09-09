@@ -18,10 +18,10 @@
     "expo": "~57.0.0",
     "expo-font": "*",
     "expo-splash-screen": "*",
-    "expo-status-bar": "~2.2.0",
-    "react": "19.2.0",
-    "react-native": "0.86.1",
-    "react-native-safe-area-context": "^5.1.0",
-    "react-native-screens": "^4.4.0"
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "~0.86.0",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "~4.26.0"
   }
 }
