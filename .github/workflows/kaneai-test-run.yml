@@ -1,0 +1,243 @@
+name: KaneAI Sanity Test Run
+
+# Manually triggered workflow that:
+#   1. Checks the status of the given KaneAI Test Run (Test Manager API).
+#   2. If it is anything other than "Not Started" (i.e. already run before),
+#      duplicates it so results are not overwritten, and uses the new copy.
+#   3. Triggers the (original or duplicated) Test Run via the HyperExecute
+#      trigger API.
+#   4. Polls the job status API until the run reaches a terminal state and
+#      fails the workflow if it did not complete.
+#
+# Required repository secrets (Settings > Secrets and variables > Actions):
+#   LT_USERNAME   - Your TestMu AI (LambdaTest) platform username
+#   LT_ACCESS_KEY - Your TestMu AI (LambdaTest) platform access key
+#
+# Docs:
+#   https://www.lambdatest.com/support/docs/kaneai-ci-cd-automation/
+#   https://www.lambdatest.com/support/api-doc/?key=test-management (Test Runs)
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_run_id:
+        description: "KaneAI Test Run ID (Test Manager > Test Runs > open run > copy ID from URL)"
+        required: true
+        type: string
+        default: "01M4ZK92N2PRYE6Z8ZQT1TC130"
+      project_id:
+        description: "KaneAI Project ID (for traceability in logs/summary only - not required by the Test Run APIs used here)"
+        required: false
+        type: string
+        default: "01JBVQ5XA1CKB2TH3QSJ6KX2VE"
+      concurrency:
+        description: "Concurrency for this test run"
+        required: false
+        default: "1"
+        type: string
+      title:
+        description: "Unique build/job title (optional - a random one is generated if omitted)"
+        required: false
+        type: string
+
+# Least-privilege default: this workflow only calls external APIs, it does not
+# need write access to the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: kaneai-test-run-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  kaneai-test-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Fail fast with a clear message instead of a confusing curl/auth error
+      # later in the job if the required secrets were never configured.
+      - name: Validate required secrets
+        run: |
+          set -euo pipefail
+          if [[ -z "${{ secrets.LT_USERNAME }}" || -z "${{ secrets.LT_ACCESS_KEY }}" ]]; then
+            echo "::error::Repository secrets LT_USERNAME and LT_ACCESS_KEY must be set (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+
+      - name: Check current Test Run status
+        id: check-status
+        env:
+          LT_USERNAME: ${{ secrets.LT_USERNAME }}
+          LT_ACCESS_KEY: ${{ secrets.LT_ACCESS_KEY }}
+          TEST_RUN_ID: ${{ inputs.test_run_id }}
+        run: |
+          set -euo pipefail
+
+          auth="$(printf '%s:%s' "${LT_USERNAME}" "${LT_ACCESS_KEY}" | base64 -w 0)"
+
+          # The bare GET /api/v1/test-run/{id} endpoint does not return a
+          # status field - status lives in test_run_details.status on the
+          # instances endpoint, so that is what we query here.
+          response="$(curl --silent --show-error --fail-with-body \
+            --location "https://test-manager-api.lambdatest.com/api/v1/test-run/instances/${TEST_RUN_ID}?page=1&per_page=1" \
+            --header 'Accept: application/json' \
+            --header "Authorization: Basic ${auth}")"
+
+          status="$(echo "${response}" | jq -r '.test_run_details.status // empty')"
+
+          if [[ -z "${status}" ]]; then
+            echo "::error::Could not determine status for test run ${TEST_RUN_ID}. Response: ${response}"
+            exit 1
+          fi
+
+          echo "Current status of test run ${TEST_RUN_ID}: ${status}"
+          echo "status=${status}" >> "${GITHUB_OUTPUT}"
+
+      - name: Duplicate Test Run if it has already been started
+        id: resolve-run
+        env:
+          LT_USERNAME: ${{ secrets.LT_USERNAME }}
+          LT_ACCESS_KEY: ${{ secrets.LT_ACCESS_KEY }}
+          TEST_RUN_ID: ${{ inputs.test_run_id }}
+          CURRENT_STATUS: ${{ steps.check-status.outputs.status }}
+        run: |
+          set -euo pipefail
+
+          # Normalize for a case/whitespace-insensitive comparison against
+          # "Not Started" (the value KaneAI uses for a run that has never
+          # been executed).
+          normalized_status="$(echo "${CURRENT_STATUS}" | tr '[:upper:]' '[:lower:]' | xargs)"
+
+          if [[ "${normalized_status}" == "not started" ]]; then
+            echo "Test run ${TEST_RUN_ID} has not been started yet - reusing it directly."
+            echo "resolved_test_run_id=${TEST_RUN_ID}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "Test run ${TEST_RUN_ID} is already '${CURRENT_STATUS}' - duplicating it before triggering so existing results are not overwritten."
+
+            auth="$(printf '%s:%s' "${LT_USERNAME}" "${LT_ACCESS_KEY}" | base64 -w 0)"
+
+            response="$(curl --silent --show-error --fail-with-body \
+              --request POST \
+              --location "https://test-manager-api.lambdatest.com/api/v1/test-run/duplicate/${TEST_RUN_ID}" \
+              --header 'Accept: application/json' \
+              --header 'Content-Type: application/json' \
+              --header "Authorization: Basic ${auth}" \
+              --data '{}')"
+
+            echo "Duplicate response: ${response}"
+
+            new_id="$(echo "${response}" | jq -r '.id // empty')"
+
+            if [[ -z "${new_id}" ]]; then
+              echo "::error::Duplicate Test Run API did not return a new id. Response: ${response}"
+              exit 1
+            fi
+
+            echo "Duplicated test run ${TEST_RUN_ID} -> new test run id ${new_id}"
+            echo "resolved_test_run_id=${new_id}" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Trigger KaneAI test run
+        id: trigger
+        env:
+          LT_USERNAME: ${{ secrets.LT_USERNAME }}
+          LT_ACCESS_KEY: ${{ secrets.LT_ACCESS_KEY }}
+          TEST_RUN_ID: ${{ steps.resolve-run.outputs.resolved_test_run_id }}
+          RUN_CONCURRENCY: ${{ inputs.concurrency }}
+          BUILD_TITLE: ${{ inputs.title }}
+        run: |
+          set -euo pipefail
+
+          # Basic Auth header value: base64("username:access_key")
+          auth="$(printf '%s:%s' "${LT_USERNAME}" "${LT_ACCESS_KEY}" | base64 -w 0)"
+
+          # Build the request body with jq so values are properly JSON-escaped
+          # (the LambdaTest doc's raw curl example has an invalid trailing
+          # comma and does not escape inputs - this avoids both issues).
+          payload="$(jq -n \
+            --arg test_run_id "${TEST_RUN_ID}" \
+            --argjson concurrency "${RUN_CONCURRENCY:-1}" \
+            --arg title "${BUILD_TITLE:-}" \
+            '{
+              test_run_id: $test_run_id,
+              concurrency: $concurrency,
+              extent_report_enabled: true
+            } + (if $title != "" then {title: $title} else {} end)')"
+
+          response="$(curl --silent --show-error --fail-with-body \
+            --location 'https://test-manager-api.lambdatest.com/api/atm/v1/hyperexecute' \
+            --header 'Accept: application/json' \
+            --header 'Content-Type: application/json' \
+            --header "Authorization: Basic ${auth}" \
+            --data "${payload}")"
+
+          echo "Trigger response: ${response}"
+
+          job_id="$(echo "${response}" | jq -r '.job_id // empty')"
+          app_job_id="$(echo "${response}" | jq -r '.app_job_id // empty')"
+
+          if [[ -z "${job_id}" && -z "${app_job_id}" ]]; then
+            echo "::error::KaneAI trigger API did not return a job_id. Response: ${response}"
+            exit 1
+          fi
+
+          # Modern replacement for the deprecated `::set-output` command.
+          {
+            echo "job_id=${job_id}"
+            echo "app_job_id=${app_job_id}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Poll KaneAI job status
+        id: status
+        env:
+          LT_USERNAME: ${{ secrets.LT_USERNAME }}
+          LT_ACCESS_KEY: ${{ secrets.LT_ACCESS_KEY }}
+          JOB_ID: ${{ steps.trigger.outputs.job_id }}
+          PROJECT_ID: ${{ inputs.project_id }}
+          RESOLVED_TEST_RUN_ID: ${{ steps.resolve-run.outputs.resolved_test_run_id }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${JOB_ID}" ]]; then
+            echo "::error::No job_id was produced by the trigger step; cannot poll status."
+            exit 1
+          fi
+
+          auth="$(printf '%s:%s' "${LT_USERNAME}" "${LT_ACCESS_KEY}" | base64 -w 0)"
+
+          # Poll instead of a single blind `sleep 240` (as in the LambdaTest
+          # sample) so the workflow reacts as soon as the job finishes and
+          # still has a hard ceiling (15 min) in case it never resolves.
+          max_attempts=30
+          interval_seconds=30
+          attempt=1
+          status="unknown"
+
+          while (( attempt <= max_attempts )); do
+            response="$(curl --silent --show-error --fail-with-body \
+              --location "https://api.hyperexecute.cloud/v2.0/job/${JOB_ID}" \
+              --header 'Accept: application/json' \
+              --header "Authorization: Basic ${auth}")"
+
+            status="$(echo "${response}" | jq -r '.data.status // "unknown"')"
+            echo "Attempt ${attempt}/${max_attempts}: status=${status}"
+
+            case "${status}" in
+              completed|failed|stopped|error)
+                break
+                ;;
+            esac
+
+            attempt=$((attempt + 1))
+            sleep "${interval_seconds}"
+          done
+
+          echo "final_status=${status}" >> "${GITHUB_OUTPUT}"
+
+          if [[ "${status}" != "completed" ]]; then
+            echo "::error::KaneAI test run did not complete successfully (final status: ${status}). Job: https://hyperexecute.lambdatest.com/hyperexecute/task?jobId=${JOB_ID}"
+            exit 1
+          fi
+
+          echo "KaneAI test run completed successfully."
+          echo "Project: ${PROJECT_ID}  |  Test Run: ${RESOLVED_TEST_RUN_ID}  |  Job: https://hyperexecute.lambdatest.com/hyperexecute/task?jobId=${JOB_ID}"
